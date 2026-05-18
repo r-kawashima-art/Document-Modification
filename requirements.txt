@@ -1,0 +1,6 @@
+python-docx>=1.1.0
+openpyxl>=3.1.0
+# Optional PDF backends — install whichever is available on the host:
+#   docx2pdf  (uses Microsoft Word on macOS/Windows)
+#   LibreOffice headless (`brew install --cask libreoffice`) — used as fallback
+docx2pdf>=0.1.8 ; platform_system != "Linux"

@@ -3,6 +3,18 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Agents
+.agent
+.claude/*
+!.claude/skills/document-modification/*
+
+# Privacy
+output/
+templates/
+
+# Steering
+docs/
+
 # C extensions
 *.so
 
