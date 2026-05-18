@@ -10,9 +10,9 @@ Designed for the administrative department (管理部) to eliminate manual editi
 
 | Audience | Use this when… | Recommended mode |
 |---|---|---|
-| Admin staff on Cowork | You have a Word/Excel template and a spreadsheet of values; you want it done in chat. | **Cowork Skill** — natural language |
-| Engineers / power users | You want to schedule the job, integrate with Slack, or batch hundreds of rows. | **Python CLI** — terminal |
-| New-template owners | You want this automation to work for a brand-new document type. | Follow §5 *Onboard a new template* |
+| Admin staff on Cowork | You have a Word/Excel template and a spreadsheet of values; you want it done in chat. | **Cowork Skill** — natural language (§3) |
+| Engineers / power users | You want to schedule the job, integrate with Slack, or batch hundreds of rows. | **Python CLI** — terminal (§4) |
+| New-template owners | You want to convert an existing Word/Excel doc into a reusable template. | **Auto-tokenizer** — Skill or CLI (§9) |
 
 The system is built on the contract: **one tokenized template + one Excel data table → one rendered output per row**. Anything that fits this contract works without engine changes.
 
@@ -21,22 +21,29 @@ The system is built on the contract: **one tokenized template + one Excel data t
 ## 1. Architecture at a glance
 
 ```text
-data.xlsx (rows)  +  template.docx / .xlsx ({{tokens}})
-                            │
-                            ▼
-                  doc_modifier.pipeline
-                            │
-        ┌───────────────────┼───────────────────┐
-        ▼                   ▼                   ▼
-   output/*.docx       output/*.xlsx       output/*.pdf
+source.docx (no tokens yet)
+       │
+       ▼
+   tokenize_cli  ────▶  Template (.docx with {{tokens}})  +  Starter data (.xlsx)
+                                │                                 │
+                                ▼                                 ▼
+                          ┌──────────────────────────────────────────┐
+                          │             doc_modifier.pipeline        │
+                          └──────────────────────────────────────────┘
+                                                │
+                       ┌────────────────────────┼────────────────────────┐
+                       ▼                        ▼                        ▼
+                  output/*.docx            output/*.xlsx             output/*.pdf
 ```
 
-Two front-ends, one engine:
+Two engines, four front-ends, one repo:
 
-1. **Cowork Skill** at `.claude/skills/document-modification/SKILL.md` — Claude inside Cowork picks this up automatically whenever a user asks to fill a template from a spreadsheet.
-2. **Python CLI** at `src/doc_modifier/` — `python -m doc_modifier …` for terminal users and automation pipelines.
+| Engine | Cowork Skill | Python CLI | Purpose |
+|---|---|---|---|
+| Renderer | `document-modification` | `python -m doc_modifier …` | Fill a tokenized template from rows in a data .xlsx (§3 / §4). |
+| Tokenizer | `template-tokenizer` | `python -m doc_modifier.tokenize_cli …` | Convert a source document into a tokenized template + starter data file (§9). |
 
-Both routes call the same pipeline, so behavior, output, and acceptance guarantees are identical.
+Both routes call the same underlying engine, so behavior, output, and acceptance guarantees are identical whether you use chat or terminal.
 
 ---
 
@@ -262,22 +269,244 @@ python3 tests/test_docx_replacer.py
 
 ---
 
-## 9. Repository layout
+## 9. Auto-tokenize a source document
+
+Section 5 walked through manual tokenization in Word. For most admin documents, **you can skip that entirely** and let the engine generate the tokenized template for you — including the matching starter data file.
+
+### 9.1 Mental model
+
+```text
+Source document (.docx)             →  Tokenizer  →   Tokenized template (.docx) + Starter data (.xlsx)
+e.g. Source_Invitation_Letter.docx                    e.g. Template_Invitation_Letter.docx
+                                                            data/starter_invitation.xlsx
+```
+
+The tokenizer is a **separate tool** from the renderer. It runs once per document type to produce a template + starter data file. After that, the `document-modification` engine (§3 / §4) takes over to render filled letters from spreadsheet rows.
+
+| Input | Output |
+|---|---|
+| A source `.docx` containing a *label : value* table | A tokenized `.docx` with `{{snake_case}}` placeholders |
+| *(optional)* an explicit override mapping (`.yaml` / `.json` / `.xlsx`) | A starter `.xlsx` whose header row matches the tokens, plus one example row pre-filled with the original sample values |
+
+### 9.2 Use it via Cowork Skill (Recommended path)
+
+The Skill at `.claude/skills/template-tokenizer/SKILL.md` is auto-discovered by Cowork. The intended chat workflow is a two-step "preview → confirm" loop so nothing is written before you approve the plan.
+
+**Step A — ask Claude to analyze the document.**
+
+> *「`templates/originals/Source_Invitation_Letter.docx` をテンプレ化して。」*
+>
+> *"Tokenize `templates/originals/Source_Invitation_Letter.docx` — propose tokens but don't write yet."*
+
+Claude will run a `--dry-run` and reply with the proposed plan as a readable table (token, source label, original value, location). If any value is ambiguous (e.g. two rows both containing "Japan"), Claude flags it explicitly.
+
+**Step B — confirm or adjust.**
+
+You can answer with any of:
+
+> *"Looks good. Save the template to `templates/Template_Invitation_Letter.docx` and emit a starter data file at `data/starter_invitation.xlsx`."*
+>
+> *「`{{signing_entity}}` も追加して — 会社名のところ。」 / "Also add a token for the signing entity — that's the company name at the bottom."*
+>
+> *"Rename `{{passport_no}}` to `{{passport_number}}`."*
+
+Claude will fold any overrides into a mapping, re-run the tokenizer, and reply with computer:// links to the two output files. From there, immediately invoke the `document-modification` Skill on the starter data file to verify the chain works end-to-end (§9.4).
+
+**What Claude does under the hood** — same as the CLI workflow below; you never need to leave the chat.
+
+```mermaid
+sequenceDiagram
+    participant U as Admin user (管理部)
+    participant C as Claude (Cowork)
+    participant T as tokenize_cli
+    participant R as doc_modifier CLI
+    U->>C: "Tokenize this Word doc"
+    C->>T: --source … --dry-run
+    T-->>C: 9 proposed replacements + warnings
+    C->>U: Proposed token list (review)
+    U->>C: "Looks good — save as templates/X.docx"
+    C->>T: --source … --out … --starter-data …
+    T-->>C: Wrote template + starter data
+    C->>R: --template … --data starter.xlsx --list-tokens
+    R-->>C: Token check ✓
+    C->>U: computer:// links to template + data + sample render
+```
+
+### 9.3 Use it via Python CLI (terminal mode)
+
+Two steps: **dry-run** first, then **apply**.
+
+**Step 1 — dry-run.** Inspect the proposed plan without writing anything.
+
+```bash
+cd /Users/r-kawashima/Projects/Document-Modification
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source "templates/originals/Source_Invitation_Letter.docx" \
+    --dry-run
+```
+
+Expected output:
+
+```text
+Proposed 9 replacement(s):
+
+  TOKEN                            LABEL                        ORIGINAL VALUE
+  -------------------------------- ---------------------------- ----------------------------------------
+  {{name}}                         Name                         Mr. Takamichi Yanai
+                                                                @ table[0].row[0].col[2]
+  {{date_of_birth}}                Date of birth                25/07/1969
+                                                                @ table[0].row[1].col[2]
+  {{nationality}}                  Nationality                  Japan
+                                                                @ table[0].row[2].col[2]
+  {{passport_no}}                  Passport No.                 TS4561348
+                                                                @ table[0].row[3].col[2]
+  {{passport_issuing_country}}     Passport issuing country     Japan
+                                                                @ table[0].row[4].col[2]
+  {{date_of_issue}}                Date of Issue                18/10/2019
+                                                                @ table[0].row[5].col[2]
+  {{date_of_expiry}}               Date of Expiry               18/10/2029
+                                                                @ table[0].row[6].col[2]
+  {{mobile_no}}                    Mobile No.                   +81 90-8501-0521
+                                                                @ table[0].row[7].col[2]
+  {{name}}                         Mr. Takamichi Yanai          Mr. Takamichi Yanai
+                                                                @ body paragraph 13
+
+Warnings (1):
+  ⚠ Ambiguous value 'Japan' maps to multiple tokens (nationality, passport_issuing_country); keeping cell-scoped only.
+```
+
+Read each line as: `{{TOKEN}}` ← will replace ORIGINAL VALUE at LOCATION. If the plan looks right, proceed to Step 2.
+
+**Step 2 — apply.** Write the tokenized template and (recommended) a starter data file.
+
+```bash
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source "templates/originals/Source_Invitation_Letter.docx" \
+    --out    "templates/Template_Invitation_Letter.docx" \
+    --starter-data "data/starter_invitation.xlsx"
+```
+
+Expected tail of output:
+
+```text
+Wrote tokenized template: templates/Template_Invitation_Letter.docx  (9 substitutions)
+Wrote starter data file:    data/starter_invitation.xlsx
+
+Tokens present in output (8): date_of_birth, date_of_expiry, date_of_issue, mobile_no, name,
+                              nationality, passport_issuing_country, passport_no
+```
+
+The starter data file's first row contains the token names; its second row is the example values from the source — useful as a sanity-check render.
+
+### 9.4 End-to-end example — tokenize → render in one chain
+
+This is the full lifecycle for a brand-new admin document, from source `.docx` to printed PDF letters, using only the two CLIs:
+
+```bash
+cd /Users/r-kawashima/Projects/Document-Modification
+
+# (1) Tokenize the source document
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source "templates/originals/Source_Invitation_Letter.docx" \
+    --out    "templates/Template_Invitation_Letter.docx" \
+    --starter-data "data/starter_invitation.xlsx"
+
+# (2) Confirm the template's tokens match the starter data's columns
+PYTHONPATH=src python3 -m doc_modifier \
+    --template "templates/Template_Invitation_Letter.docx" \
+    --list-tokens
+
+# (3) Edit data/starter_invitation.xlsx in Excel — add more applicant rows.
+
+# (4) Render: one .docx + .pdf per row, into output/
+PYTHONPATH=src python3 -m doc_modifier \
+    --template "templates/Template_Invitation_Letter.docx" \
+    --data     "data/starter_invitation.xlsx" \
+    --out      "output/" \
+    --formats  docx,pdf
+```
+
+Or, in Cowork chat:
+
+> *"Tokenize `templates/originals/Source_Invitation_Letter.docx`, save it as `templates/Template_Invitation_Letter.docx`, emit a starter data file, then render letters from it as both docx and pdf."*
+
+Claude will chain the two Skills (`template-tokenizer` → `document-modification`) automatically.
+
+### 9.5 How the tokenizer decides what to replace
+
+| Pass | What it does |
+|---|---|
+| Auto-detect tables | Scans every table; rows matching *label : value* become **cell-scoped** replacements with `snake_case` tokens derived from the label. |
+| Explicit overrides | If `--mapping <yaml/json/xlsx>` is supplied, those entries are merged in (mapping wins on conflict). |
+| Ambiguity guard | If two table rows share the same sample value (e.g. "Japan"), the tokenizer keeps each replacement cell-scoped and prints a warning instead of silently picking one. |
+| Body sweep | For every *unambiguous* table value, the tokenizer searches body paragraphs for the same literal text and replaces it with the same token (so inline name mentions get tokenized too). |
+| Apply | Uses the same run-aware replacement as the renderer — fonts (フォント) and line breaks (改行) survive. |
+
+### 9.6 Override the auto-detector when needed
+
+The tokenizer's heuristic catches label:value tables, but it can miss inline-only fields (e.g. the letter date in the header, a signing entity in the footer). Supply an explicit mapping to cover those:
+
+```yaml
+# mappings.yaml — keys are the exact original text, values are the token name (no {{ }})
+"Adventure India Journey Private Limited": signing_entity
+"14th Jan, 2025":                          letter_date
+"Mr. Takamichi Yanai":                     name      # also re-confirm a tricky inline one
+```
+
+```bash
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source "templates/originals/Source_Invitation_Letter.docx" \
+    --mapping mappings.yaml \
+    --out    "templates/Template_Invitation_Letter.docx" \
+    --starter-data "data/starter_invitation.xlsx"
+```
+
+The mapping is merged with auto-detect. To rely **only** on the mapping, add `--no-auto-detect`.
+
+JSON works the same way (`{"original text": "token_name"}`). For Excel, use two columns: `original` | `token`.
+
+### 9.7 Tokenizer CLI flags
+
+| Flag | Required? | Meaning |
+|---|---|---|
+| `--source <path>` | ✅ | Source `.docx` to tokenize. |
+| `--out <path>` | ✅ (unless `--dry-run`) | Output tokenized `.docx` path. |
+| `--mapping <path>` | optional | Explicit override mapping (`.yaml` / `.json` / `.xlsx`). |
+| `--no-auto-detect` | optional | Disable auto-detection (rely only on `--mapping`). |
+| `--starter-data <path>` | optional | Also emit a starter `.xlsx` data file with token columns + one example row. |
+| `--dry-run` | optional | Print the plan and exit. **Always run this first.** |
+| `-v` / `--verbose` | optional | Debug logging. |
+
+### 9.8 Tokenizer troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `Proposed 0 replacement(s)` | The source has no table that matches the label:value heuristic. | Supply an explicit `--mapping` for the fields you want tokenized. |
+| Ambiguity warning ("X maps to multiple tokens") | Two table rows share the same sample value. | The tokenizer keeps both cell-scoped — usually safe. If you do want a doc-wide replacement, rename one of the sample values in the source first. |
+| A field you wanted is missing | It lives outside any table (e.g. inline in the header). | Add it via `--mapping mappings.yaml`. |
+| A field is tokenized that shouldn't be | The heuristic mis-classified a label:value table. | Use `--no-auto-detect` with an explicit mapping, or restructure the source so the unwanted table is below the relevant content. |
+| Token name has odd characters | Source label contained punctuation (e.g. "Passport No."). | The tokenizer strips punctuation automatically (`passport_no`). Rename in `--mapping` if you want a different style. |
+
+---
+
+## 10. Repository layout
 
 | Path | What lives here |
 |---|---|
 | `specs/` | User story, requirements, design, implementation plan |
 | `docs/walkthrough.md` | Current proof-of-progress |
-| `src/doc_modifier/` | The engine (CLI + pipeline + replacers + PDF exporter) |
+| `src/doc_modifier/` | The engine (CLI + pipeline + replacers + PDF exporter + tokenizer) |
 | `templates/` | Reusable tokenized templates — add new ones here |
+| `templates/originals/` | Source documents (pre-tokenization) |
 | `data/` | Example data tables — add new ones here |
 | `output/` | Rendered outputs (gitignored) |
 | `tests/` | Acceptance tests |
-| `.claude/skills/document-modification/` | Cowork Skill manifest |
+| `.claude/skills/document-modification/` | Cowork Skill for rendering templates |
+| `.claude/skills/template-tokenizer/` | Cowork Skill for auto-tokenizing source documents |
 
 ---
 
-## 10. Roadmap
+## 11. Roadmap
 
 - **Second template** (e.g., Adventure China invitation letter) — token-only addition; engine unchanged.
 - **Slack integration** — drop a data .xlsx into a Slack channel, receive rendered PDFs back. Aligned with the original mission statement.

@@ -6,7 +6,10 @@ __pycache__/
 # Agents
 .agent
 .claude/*
-!.claude/skills/document-modification/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/document-modification/
+!.claude/skills/template-tokenizer/
 
 # Privacy
 output/
