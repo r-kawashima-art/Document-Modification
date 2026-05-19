@@ -13,8 +13,9 @@ Before doing anything else, classify the user's query against this table and inv
 | Convert an existing Word/Excel doc into a reusable tokenized template | "テンプレ化", "tokenize this doc", "make a template from this file", "extract fields", "auto-detect the fields", "place `{{tokens}}` in this doc" | `.claude/skills/template-tokenizer/` |
 | Fill a tokenized template with rows from an Excel data table | "招待状作って", "fill in the template", "render letters from `data.xlsx`", "差し込み印刷", "generate filled documents", "ビザ書類作って" | `.claude/skills/document-modification/` |
 | End-to-end: "I have a raw Word doc and want filled letters" | "make a template AND render letters", "テンプレ化してから差し込みも", "from this source doc, produce filled invitations" | First `template-tokenizer`, **then** `document-modification` |
+| Utility / "just run the Python for me" — token inspection, PDF-only conversion, test run, dependency install, data-file column inspection, ambiguous multi-step requests | "run the python script", "do this with the doc tools", "convert this docx to pdf", "what tokens are in this template?", "install dependencies", "verify the engine", "Pythonでやって" | `.claude/skills/doc-automation-runner/` (which internally **delegates** to the two task-specific Skills for tokenize / render work, never bypasses them) |
 
-If a query plausibly matches more than one row, run the Skills in the order shown so the second Skill's input (a tokenized template) is always available before it executes.
+If a query plausibly matches more than one row, run the Skills in the order shown so the second Skill's input (a tokenized template) is always available before it executes. The `doc-automation-runner` Skill is the front door for **utility** and **chained** requests — never for pure tokenize-only or render-only requests, which always go directly to the task-specific Skills.
 
 ---
 
@@ -64,6 +65,7 @@ Use these unless the user specifies otherwise:
 | Rendered outputs | `output/` |
 | Tokenizer Skill | `.claude/skills/template-tokenizer/` |
 | Renderer Skill | `.claude/skills/document-modification/` |
+| Runner Skill (dispatcher for utility / chained operations) | `.claude/skills/doc-automation-runner/` |
 | Specs (User Story / Requirements / Design / Plan) | `specs/` |
 | Walkthrough (progress log) | `docs/walkthrough.md` |
 

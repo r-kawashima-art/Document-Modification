@@ -36,14 +36,15 @@ source.docx (no tokens yet)
                   output/*.docx            output/*.xlsx             output/*.pdf
 ```
 
-Two engines, four front-ends, one repo:
+Two engines + one dispatcher, five front-ends, one repo:
 
-| Engine | Cowork Skill | Python CLI | Purpose |
+| Engine / Role | Cowork Skill | Python CLI | Purpose |
 |---|---|---|---|
 | Renderer | `document-modification` | `python -m doc_modifier …` | Fill a tokenized template from rows in a data .xlsx (§3 / §4). |
 | Tokenizer | `template-tokenizer` | `python -m doc_modifier.tokenize_cli …` | Convert a source document into a tokenized template + starter data file (§9). |
+| Dispatcher | `doc-automation-runner` | *(this Skill calls the others; no dedicated CLI)* | Single front door for utility ops (list-tokens, PDF-only convert, run tests, install deps) and chained workflows (tokenize → render). Delegates to the two task-specific Skills for pure tokenize / render requests. |
 
-Both routes call the same underlying engine, so behavior, output, and acceptance guarantees are identical whether you use chat or terminal.
+Both engines call the same underlying run-aware text-mutation core, so behavior, output, and acceptance guarantees are identical whether you reach them via chat, the dispatcher, or the terminal.
 
 ---
 
@@ -503,6 +504,7 @@ JSON works the same way (`{"original text": "token_name"}`). For Excel, use two 
 | `tests/` | Acceptance tests |
 | `.claude/skills/document-modification/` | Cowork Skill for rendering templates |
 | `.claude/skills/template-tokenizer/` | Cowork Skill for auto-tokenizing source documents |
+| `.claude/skills/doc-automation-runner/` | Cowork Skill dispatcher — single front door for utility operations and chained workflows |
 
 ---
 

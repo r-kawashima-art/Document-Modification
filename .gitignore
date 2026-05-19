@@ -10,6 +10,7 @@ __pycache__/
 .claude/skills/*
 !.claude/skills/document-modification/
 !.claude/skills/template-tokenizer/
+!.claude/skills/doc-automation-runner/
 
 # Privacy
 output/
