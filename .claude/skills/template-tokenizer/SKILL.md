@@ -19,6 +19,7 @@ The engine preserves fonts (フォント) and line breaks (改行) bit-for-bit �
 - The user uploaded or referenced an admin document (招待状, 依頼書, 申請書, contract, etc.) and wants to "make a template" out of it.
 - The user mentions «テンプレ化», "tokenize", "extract fields", "create a template from".
 - Onboarding a brand-new document type into the document-modification pipeline.
+- The user wants to **add new tokens** to an already-tokenized template (use `--mapping` + `--no-auto-detect`).
 
 Do **not** use this skill for:
 
@@ -82,10 +83,62 @@ PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
 
 The mapping is merged with auto-detect (mapping wins on conflicts).
 
+## Adding tokens to an already-tokenized template
+
+When the user wants to add new `{{tokens}}` to a template that already has existing placeholders (e.g. adding `letter_date`, `company`, pronoun tokens), use `--no-auto-detect` so the engine only applies the explicit mapping without trying to re-tokenize existing `{{...}}` strings:
+
+```bash
+# 1. Dry-run to preview
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source templates/existing_tokenized.docx \
+    --mapping data/new_tokens.yaml \
+    --no-auto-detect \
+    --dry-run -v
+
+# 2. Apply (overwrites the template in-place; engine preserves all existing tokens)
+PYTHONPATH=src python3 -m doc_modifier.tokenize_cli \
+    --source templates/existing_tokenized.docx \
+    --mapping data/new_tokens.yaml \
+    --no-auto-detect \
+    --out templates/existing_tokenized.docx \
+    --starter-data data/updated_starter.xlsx
+```
+
+> **Longest-match safety**: the engine sorts doc-wide replacements by descending length before applying them. This means longer strings like `"his/her"` are replaced before shorter substrings like `"her"`, preventing double-replacements. Rely on this when mapping pronoun variants.
+
+## Standard token set for the Adventure India Invitation Letter
+
+The current tokenized template (`templates/Template_Invitation_Letter_Adventure_India_tokenized.docx`) uses these tokens:
+
+| Token | Typical value | Source in original doc |
+|---|---|---|
+| `{{letter_date}}` | `26th May, 2026` | Date at top of letter |
+| `{{name}}` | `Mr. Taro Yamada` | Name field in table + body |
+| `{{date_of_birth}}` | `01/01/1990` | Table |
+| `{{nationality}}` | `Japan` | Table |
+| `{{passport_no}}` | `AB1234567` | Table |
+| `{{passport_issuing_country}}` | `Japan` | Table |
+| `{{date_of_issue}}` | `01/01/2020` | Table |
+| `{{date_of_expiry}}` | `01/01/2030` | Table |
+| `{{mobile_no}}` | `+81 90-0000-0000` | Table |
+| `{{company}}` | `Adventure, Inc.` | Body paragraph |
+| `{{date_of_visit}}` | `26th May, 2026` | Body paragraph |
+| `{{pronoun_subj}}` | `he` / `she` | Body paragraph (lowercase subject) |
+| `{{pronoun_subj_cap}}` | `He` / `She` | Body paragraph (capitalised subject) |
+| `{{pronoun_obj}}` | `him` / `her` | Body paragraph (object) |
+| `{{pronoun_poss}}` | `his` / `her` | Body paragraph (possessive) |
+
+### Pronoun mapping by gender
+
+| Gender | `pronoun_subj` | `pronoun_subj_cap` | `pronoun_obj` | `pronoun_poss` |
+|---|---|---|---|---|
+| Male | `he` | `He` | `him` | `his` |
+| Female | `she` | `She` | `her` | `her` |
+
 ## What Claude should do step-by-step
 
 1. **Locate the source.** Confirm the source `.docx` path with the user. If the user uploaded a file, copy it under `templates/originals/` (don't tokenize in place — always preserve the original).
-2. **Dry-run.** Run the CLI with `--dry-run` and read the proposed plan back to the user.
+2. **Dry-run.** Run the CLI with `--dry-run` and read the proposed plan back to the user as a table (token, original value, location).
 3. **Handle ambiguity.** If the tokenizer reports an ambiguous value (e.g. "Japan" → two tokens), confirm with the user that the cell-scoped treatment is acceptable, or offer to add an explicit mapping.
 4. **Confirm.** Ask the user to approve the plan and to pick the output template path.
 5. **Apply.** Run the CLI again without `--dry-run`, passing `--out` and (ideally) `--starter-data`.

@@ -1,0 +1,12 @@
+# Explicit token mapping — new fields added 2026-05-26
+# Longer matches are applied first (engine sorts by -len), so "his/her" / "him/her"
+# are replaced before the standalone "her" in paragraph 10.
+
+"14th Jan, 2025": letter_date
+"Adventure, Inc.": company
+"19th Jan, 2025": date_of_visit
+"his/her": pronoun_poss
+"him/her": pronoun_obj
+"he/she": pronoun_subj
+"He/She": pronoun_subj_cap
+"her": pronoun_obj

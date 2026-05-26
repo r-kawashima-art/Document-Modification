@@ -30,17 +30,41 @@ If the user only mentions one of these, ask for the rest.
 
 ## Default schema for the Invitation Letter
 
-| Column header | Token in template |
-|---|---|
-| `name` | `{{name}}` |
-| `date_of_birth` | `{{date_of_birth}}` |
-| `nationality` | `{{nationality}}` |
-| `passport_no` | `{{passport_no}}` |
-| `passport_issuing_country` | `{{passport_issuing_country}}` |
-| `date_of_issue` | `{{date_of_issue}}` |
-| `date_of_expiry` | `{{date_of_expiry}}` |
-| `mobile_no` | `{{mobile_no}}` |
-| `output_filename` *(optional)* | — used as the output basename |
+| Column header | Token in template | Notes |
+|---|---|---|
+| `letter_date` | `{{letter_date}}` | Date printed at the top of the letter (e.g. `26th May, 2026`). To auto-fill today's date, populate this column with `=TEXT(TODAY(),"d mmmm, yyyy")` in Excel, or pass the formatted date string directly. |
+| `name` | `{{name}}` | Full name including title (e.g. `Mr. Taro Yamada`) |
+| `date_of_birth` | `{{date_of_birth}}` | |
+| `nationality` | `{{nationality}}` | |
+| `passport_no` | `{{passport_no}}` | |
+| `passport_issuing_country` | `{{passport_issuing_country}}` | |
+| `date_of_issue` | `{{date_of_issue}}` | |
+| `date_of_expiry` | `{{date_of_expiry}}` | |
+| `mobile_no` | `{{mobile_no}}` | |
+| `company` | `{{company}}` | Company the invitee belongs to (e.g. `Adventure, Inc.`) |
+| `date_of_visit` | `{{date_of_visit}}` | Intended visit date (e.g. `26th May, 2026`) |
+| `pronoun_subj` | `{{pronoun_subj}}` | Subject pronoun — `he` or `she` |
+| `pronoun_subj_cap` | `{{pronoun_subj_cap}}` | Capitalised subject pronoun — `He` or `She` |
+| `pronoun_obj` | `{{pronoun_obj}}` | Object pronoun — `him` or `her` |
+| `pronoun_poss` | `{{pronoun_poss}}` | Possessive pronoun — `his` or `her` |
+| `output_filename` *(optional)* | — | Used as the output basename |
+
+### Pronoun quick-reference
+
+| Gender | `pronoun_subj` | `pronoun_subj_cap` | `pronoun_obj` | `pronoun_poss` |
+|---|---|---|---|---|
+| Male | `he` | `He` | `him` | `his` |
+| Female | `she` | `She` | `her` | `her` |
+
+### Auto-filling `letter_date` with today's date
+
+When preparing `data/sample_data.xlsx`, set the `letter_date` column formula to:
+
+```
+=TEXT(TODAY(),"d mmmm, yyyy")
+```
+
+This makes every rendered letter automatically carry the current date without manual editing.
 
 ## How to run
 
@@ -67,9 +91,11 @@ PYTHONPATH=src python3 -m doc_modifier \
 
 1. **Confirm inputs.** Ask the user for the template path and the data .xlsx path if not already given. Verify both files exist.
 2. **List tokens.** Run `python3 -m doc_modifier --template <path> --list-tokens` and compare against the data file's column headers. Surface any mismatches to the user before rendering.
-3. **Run the pipeline.** Use the bash command above with the user's chosen `--formats`.
-4. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
-5. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
+3. **Check pronoun columns.** If the template contains `{{pronoun_*}}` tokens, verify the data file has `pronoun_subj`, `pronoun_subj_cap`, `pronoun_obj`, and `pronoun_poss` columns filled correctly (see Pronoun quick-reference above). Remind the user if any are missing.
+4. **Check `letter_date`.** If the template contains `{{letter_date}}`, confirm the column is present. If it is blank or absent, suggest using `=TEXT(TODAY(),"d mmmm, yyyy")` as a formula in Excel.
+5. **Run the pipeline.** Use the bash command above with the user's chosen `--formats`.
+6. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
+7. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
 
 ## Onboarding a new template
 
