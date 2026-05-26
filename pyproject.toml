@@ -1,0 +1,12 @@
+[project]
+name = "document-modification"
+version = "0.1.0"
+description = "Batch document modifier — fills DOCX templates from Excel data and exports to DOCX/PDF."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    # Optional PDF backend: uses Microsoft Word on macOS/Windows; install LibreOffice as fallback on Linux
+    "docx2pdf>=0.1.8; platform_system != 'Linux'",
+]
