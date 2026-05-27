@@ -91,11 +91,14 @@ PYTHONPATH=src python3 -m doc_modifier \
 
 1. **Confirm inputs.** Ask the user for the template path and the data .xlsx path if not already given. Verify both files exist.
 2. **List tokens.** Run `python3 -m doc_modifier --template <path> --list-tokens` and compare against the data file's column headers. Surface any mismatches to the user before rendering.
-3. **Check pronoun columns.** If the template contains `{{pronoun_*}}` tokens, verify the data file has `pronoun_subj`, `pronoun_subj_cap`, `pronoun_obj`, and `pronoun_poss` columns filled correctly (see Pronoun quick-reference above). Remind the user if any are missing.
-4. **Check `letter_date`.** If the template contains `{{letter_date}}`, confirm the column is present. If it is blank or absent, suggest using `=TEXT(TODAY(),"d mmmm, yyyy")` as a formula in Excel.
-5. **Run the pipeline.** Use the bash command above with the user's chosen `--formats`.
-6. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
-7. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
+3. **Infer honorifics and pronouns from the name.** When adding or updating a row for a person, derive the honorific title and pronoun columns automatically from the person's name and gender rather than asking the user to supply them manually. Use `Mr.` / he · him · his for male names and `Ms.` / she · her · her for female names. If gender cannot be determined from the name alone, ask the user. Apply the correct title as a prefix to the `name` field (e.g. `Mr. Ryosuke Kawashima`).
+4. **Infer `output_filename` from the person's name.** If `output_filename` is blank or absent, derive it from the invitee's family name — e.g. `InvitationLetter_Kawashima`. Mirror the naming convention already used in the data file for consistency.
+5. **Adjust style from existing rows.** When creating a new row, copy style-level fields (`letter_date`, `company`, `date_of_visit`, date formats, etc.) from the other rows already in the data file so the new document is visually consistent with the rest of the batch.
+6. **Auto-fill `letter_date` when blank.** If the `letter_date` column is empty or absent for any row, populate it with today's date at prompt-execution time formatted to match the existing rows (e.g. `27 May, 2026`). Do **not** leave it blank or ask the user — just fill it in with `date.today().strftime('%-d %B, %Y')` (or equivalent) before rendering.
+7. **Check pronoun columns.** If the template contains `{{pronoun_*}}` tokens, verify the data file has the required pronoun columns filled correctly (see Pronoun quick-reference above). Remind the user if any are missing.
+8. **Run the pipeline.** Use the bash command above with the user's chosen `--formats`.
+9. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
+10. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
 
 ## Onboarding a new template
 
