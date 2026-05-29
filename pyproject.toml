@@ -9,4 +9,5 @@ dependencies = [
     "openpyxl>=3.1.0",
     # Optional PDF backend: uses Microsoft Word on macOS/Windows; install LibreOffice as fallback on Linux
     "docx2pdf>=0.1.8; platform_system != 'Linux'",
+    "anthropic>=0.105.2",
 ]
