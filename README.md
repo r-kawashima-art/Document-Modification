@@ -490,7 +490,121 @@ JSON works the same way (`{"original text": "token_name"}`). For Excel, use two 
 
 ---
 
-## 10. Repository layout
+## 10. Slack Notifications
+
+After documents are rendered, `src/slack_notifier.py` posts a completion summary to a designated Slack channel. It works in two modes: **standalone** (run once after the pipeline) and **programmatic** (called automatically from `cli.py`).
+
+### 10.1 Prerequisites
+
+Add these two keys to your `.env` file at the project root:
+
+```dotenv
+SLACK_BOT_TOKEN=xoxb-xxxxxxxxxxxx-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx
+INPUT_CHANNEL_ID=C0XXXXXXXXX   # channel to post completion notices
+```
+
+To get these values:
+- **Bot Token**: [api.slack.com/apps](https://api.slack.com/apps) → your app → **OAuth & Permissions** → copy **Bot User OAuth Token**.
+- **Channel ID**: In Slack, right-click the channel name → **View channel details** → scroll to the bottom.
+
+The bot must be invited to the channel (`/invite @YourBotName`) or it will receive a `not_in_channel` error.
+
+Install the dependency if not already present:
+
+```bash
+pip install requests python-dotenv --break-system-packages
+```
+
+### 10.2 Standalone mode — run after the pipeline
+
+After generating documents with the CLI (§4), run the notifier separately:
+
+```bash
+cd /Users/r-kawashima/Projects/Document-Modification
+python3 src/slack_notifier.py
+```
+
+The script scans `output/` for every `.docx` (and its matching `.pdf`) and posts one summary message to Slack:
+
+```
+✅ Document generation complete — 3 document(s) created from Google Spreadsheet sample_data.
+
+• InvitationLetter_Yanai_v2.docx + InvitationLetter_Yanai_v2.pdf
+• InvitationLetter_Suzuki_v2.docx + InvitationLetter_Suzuki_v2.pdf
+• InvitationLetter_Kawashima.docx + InvitationLetter_Kawashima.pdf
+
+All files saved to output/ on local machine.
+```
+
+To target a different output directory:
+
+```python
+# edit the last line of slack_notifier.py
+notify_batch_completion(output_dir="output/april/")
+```
+
+### 10.3 Programmatic mode — call from the pipeline
+
+Import `notify_completion` in `cli.py` to fire a per-applicant notification automatically at the end of every render:
+
+```python
+from slack_notifier import notify_completion
+
+# inside the render loop, after each row is written:
+notify_completion(
+    name=row["name"],
+    output_paths=["output/InvitationLetter_Yanai.docx", "output/InvitationLetter_Yanai.pdf"],
+)
+```
+
+Or call `notify_batch_completion` once after the loop exits to send a single summary instead of one message per row.
+
+### 10.4 Full flow with Google Spreadsheet
+
+To generate documents from the linked Google Spreadsheet and notify Slack in one sequence:
+
+```bash
+# 1. Export the Sheet to xlsx (done automatically by Claude in Cowork)
+#    — or download manually from Google Sheets → File → Download → .xlsx
+#    — save to data/sample_data_gdrive.xlsx
+
+# 2. Render documents
+PYTHONPATH=src python3 -m doc_modifier \
+    --template templates/Template_Invitation_Letter_Adventure_India_tokenized.docx \
+    --data     data/sample_data_gdrive.xlsx \
+    --out      output/ \
+    --formats  docx,pdf
+
+# 3. Send Slack notification
+python3 src/slack_notifier.py
+```
+
+Or ask Claude in Cowork:
+
+> *"Generate documents from the Google Spreadsheet `sample_data` and send a Slack notification when done."*
+
+Claude will execute all three steps automatically.
+
+### 10.5 Slack notifier API reference
+
+| Function | When to use |
+|---|---|
+| `notify_batch_completion(output_dir)` | Standalone mode — scans a directory and sends one summary message. |
+| `notify_completion(name, output_paths, drive_links)` | Programmatic mode — sends a per-applicant message; optionally includes Google Drive links. |
+
+To include Google Drive links in the notification, pass them as a list:
+
+```python
+notify_completion(
+    name="Mr. Takamichi Yanai",
+    output_paths=["output/InvitationLetter_Yanai.docx"],
+    drive_links=["https://drive.google.com/file/d/xxxx/view"],
+)
+```
+
+---
+
+## 11. Repository layout
 
 | Path | What lives here |
 |---|---|
@@ -508,10 +622,10 @@ JSON works the same way (`{"original text": "token_name"}`). For Excel, use two 
 
 ---
 
-## 11. Roadmap
+## 12. Roadmap
 
 - **Second template** (e.g., Adventure China invitation letter) — token-only addition; engine unchanged.
-- **Slack integration** — drop a data .xlsx into a Slack channel, receive rendered PDFs back. Aligned with the original mission statement.
+- ✅ **Slack integration** — `src/slack_notifier.py` posts completion summaries to a designated channel (§10).
 - **Dry-run mode** — print the substitution map without writing files.
 - **Email send** — auto-attach PDF to a draft for embassy submission.
 

@@ -16,7 +16,9 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import os
 from pathlib import Path
+from slack_notifier import notify_completion
 
 from . import docx_replacer, xlsx_replacer
 from .pipeline import run
@@ -69,6 +71,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Rendered {len(results)} document(s) into {args.out}/")
     for r in results:
         line = f"  [{r.row_index}] {r.primary_out.name}  ({r.substitutions} substitutions)"
+        # NEW: send Slack notification
+        if os.environ.get("SLACK_BOT_TOKEN") and os.environ.get("INPUT_CHANNEL_ID"):
+            for r in results:
+                notify_completion(
+                    name=r["name"],
+                    output_paths=r["paths"],
+                )
         if r.pdf_out:
             line += f"  +PDF: {r.pdf_out.name}"
         print(line)

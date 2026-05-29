@@ -17,7 +17,9 @@ output/
 templates/
 
 # Steering
-docs/
+docs/*
+!docs/slack_integration_setup.md
+
 
 # C extensions
 *.so

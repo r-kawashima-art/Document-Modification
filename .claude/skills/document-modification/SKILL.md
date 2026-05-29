@@ -97,8 +97,17 @@ PYTHONPATH=src python3 -m doc_modifier \
 6. **Auto-fill `letter_date` when blank.** If the `letter_date` column is empty or absent for any row, populate it with today's date at prompt-execution time formatted to match the existing rows (e.g. `27 May, 2026`). Do **not** leave it blank or ask the user — just fill it in with `date.today().strftime('%-d %B, %Y')` (or equivalent) before rendering.
 7. **Check pronoun columns.** If the template contains `{{pronoun_*}}` tokens, verify the data file has the required pronoun columns filled correctly (see Pronoun quick-reference above). Remind the user if any are missing.
 8. **Run the pipeline.** Use the bash command above with the user's chosen `--formats`.
-9. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
-10. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
+9. **Send Slack notification.** Immediately after the pipeline finishes, run:
+
+   ```bash
+   cd /Users/r-kawashima/Projects/Document-Modification
+   python3 src/slack_notifier.py
+   ```
+
+   This posts a completion summary to the configured Slack channel. If the command fails (e.g. missing `SLACK_BOT_TOKEN` in `.env`), report the error to the user but do **not** treat it as a pipeline failure — the documents were already generated successfully.
+
+10. **Present outputs.** Surface the rendered files in `output/` via computer:// links. Never silently overwrite a non-empty `output/` directory — append a timestamp if collisions are likely.
+11. **Confirm preservation.** Mention to the user that fonts and line breaks are preserved by design (Acceptance Criteria #1 and #2 from `specs/user_story.md`).
 
 ## Onboarding a new template
 

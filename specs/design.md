@@ -4,16 +4,26 @@ Technical "How" for the requirements in `requirements.md`. Architecture, state m
 
 ## 1. Architecture Overview
 
-The system has **two engines** that share the same run-aware text-mutation core: a **tokenizer** (turns a source document into a reusable template) and a **renderer** (fills a tokenized template from data rows).
+The system has **three layers** that work together:
+
+1. a **workflow layer** that accepts requests from Slack, routes approval, and tracks job state,
+2. a **document engine** that tokenizes templates and renders approved jobs, and
+3. a **delivery layer** that writes local outputs, syncs to Google Drive, and posts completion notices back to Slack.
+
+The tokenizer and renderer still share the same run-aware text-mutation core; the workflow layer simply decides when and how that core is invoked.
 
 ```mermaid
 flowchart LR
+    SLACK[Slack request<br/>intake channel] --> WF[Workflow orchestrator<br/>doc_modifier.workflow]
+    APPROVAL[Approval Slack channel] --> WF
+    WF --> P[Pipeline<br/>doc_modifier.pipeline]
+
     SRC[Source .docx<br/>templates/originals/] --> TOK[Tokenizer<br/>doc_modifier.tokenize_template]
     MAP[Optional mapping<br/>.yaml / .json / .xlsx] -.-> TOK
     TOK --> TPL[Tokenized template<br/>templates/*.docx]
     TOK --> SD[Starter data<br/>data/*.xlsx]
 
-    DATA[Data .xlsx<br/>data/] --> P[Pipeline<br/>doc_modifier.pipeline]
+    DATA[Data .xlsx<br/>data/] --> P
     TPL --> P
     SD -.->|optional seed| DATA
 
@@ -22,6 +32,13 @@ flowchart LR
     R --> O2[Rendered .xlsx]
     O1 -- pdf_exporter --> O3[.pdf]
     O2 -- pdf_exporter --> O3
+    O1 --> DRIVE[Google Drive sync<br/>doc_modifier.drive_client]
+    O2 --> DRIVE
+    O3 --> DRIVE
+    O1 --> LOCAL[Local output<br/>/output/]
+    O2 --> LOCAL
+    O3 --> LOCAL
+    DRIVE --> DONE[Slack completion notice]
 
     subgraph Tokenizer Frontends
       ST[template-tokenizer<br/>Cowork Skill]
@@ -37,7 +54,7 @@ flowchart LR
     CR --> P
 ```
 
-The tokenizer is **upstream** of the renderer: a source `.docx` flows through the tokenizer once per document type, then the renderer is invoked once per batch of applicants.
+The tokenizer is **upstream** of the renderer: a source `.docx` flows through the tokenizer once per document type, then the workflow layer invokes the renderer once per approved batch of applicants.
 
 ## 2. Component Responsibilities
 
@@ -48,11 +65,38 @@ The tokenizer is **upstream** of the renderer: a source `.docx` flows through th
 | `doc_modifier.xlsx_replacer` | Cell-by-cell token replacement for `.xlsx` templates via `openpyxl`. |
 | `doc_modifier.pdf_exporter` | Convert rendered `.docx` / `.xlsx` to `.pdf`. Tries `docx2pdf` (Word) → `soffice --headless --convert-to pdf` (LibreOffice) → raises informative error. |
 | `doc_modifier.pipeline` | Orchestrates: load rows → render template per row → optionally export PDF → write outputs to `/output/`. |
+| `doc_modifier.workflow` | Orchestrates the Slack intake, approval gate, job persistence, rendering pipeline, Drive sync, and completion notification. |
+| `doc_modifier.slack_client` | Receives intake messages, posts approval requests, and sends completion notices. |
+| `doc_modifier.drive_client` | Uploads rendered outputs to the configured Google Drive folder and returns shareable destinations. |
+| `doc_modifier.job_store` | Persists job status, approval metadata, timestamps, and output paths for auditability and retries. |
 | `doc_modifier.cli` | `argparse`-based entrypoint for the renderer. Validates inputs, prints progress, supports `--list-tokens`. |
 | `doc_modifier.tokenize_template` | **Auto-tokenizer engine.** Detects label:value tables, generates `snake_case` tokens, flags ambiguous values (same text → multiple tokens) as cell-scoped, and sweeps body paragraphs for unambiguous inline duplicates. Builds a `TokenizationPlan` dataclass and applies it via the same run-aware replacement the renderer uses, so fonts (フォント) and line breaks (改行) survive. Also exports `emit_starter_data()` to seed the data file. |
 | `doc_modifier.tokenize_cli` | `argparse`-based entrypoint for the tokenizer (`python -m doc_modifier.tokenize_cli`). Flags: `--source`, `--out`, `--mapping`, `--no-auto-detect`, `--starter-data`, `--dry-run`. |
 
 ## 3. State Transition
+
+### 3.0 Workflow FSM
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Capturing: Slack request received
+    Capturing --> AwaitingApproval: job stored + approval requested
+    AwaitingApproval --> Rejected: approver rejects
+    AwaitingApproval --> Generating: approver approves
+    Generating --> DeliveringLocal: render completes
+    DeliveringLocal --> DeliveringDrive: local save completes
+    DeliveringDrive --> Notifying: Drive upload completes
+    Notifying --> Done: Slack completion sent
+    DeliveringLocal --> Failed: render/write failure
+    DeliveringDrive --> Failed: Drive upload failure
+    Notifying --> Failed: Slack notification failure
+    Rejected --> Done
+    Failed --> [*]
+    Done --> [*]
+```
+
+**End condition:** the request is either rejected and closed, or approved and fully processed with local output, Google Drive delivery, and Slack completion notification recorded.
 
 ### 3.1 Renderer FSM
 
@@ -150,11 +194,15 @@ At apply time, cell-scoped replacements are written into the specific cell only 
 │       ├── __init__.py
 │       ├── __main__.py                  # python -m doc_modifier (renderer)
 │       ├── cli.py                       # renderer CLI
+│       ├── workflow.py                  # Slack approval workflow
 │       ├── pipeline.py                  # renderer orchestration
 │       ├── xlsx_loader.py
 │       ├── docx_replacer.py             # run-aware token replacement
 │       ├── xlsx_replacer.py
 │       ├── pdf_exporter.py
+│       ├── slack_client.py              # Slack intake / approval / notification
+│       ├── drive_client.py              # Google Drive upload
+│       ├── job_store.py                 # audit trail / request state
 │       ├── tokenize_template.py         # tokenizer engine
 │       └── tokenize_cli.py              # python -m doc_modifier.tokenize_cli
 ├── templates/

@@ -48,6 +48,30 @@ Step-by-step execution sequence. Each step has a **[State]** — `[todo]`, `[doi
 |---|------|---------------|---------|
 | 6.1 | Refresh top-level `README.md` with usage snippet. | `/README.md` | [done] |
 
+## Phase 7 — Slack Intake and Approval Workflow
+
+| # | Task | Files touched | [State] |
+|---|------|---------------|---------|
+| 7.1 | Define the Slack request payload, approval message format, and job-state schema. | `/src/doc_modifier/workflow.py`, `/src/doc_modifier/job_store.py` | [todo] |
+| 7.2 | Implement Slack intake and approval routing, including pending/approve/reject transitions. | `/src/doc_modifier/slack_client.py`, `/src/doc_modifier/workflow.py` | [todo] |
+| 7.3 | Add completion and rejection notifications back to Slack with request identifiers and status. | `/src/doc_modifier/slack_client.py` | [todo] |
+
+## Phase 8 — Google Drive Delivery
+
+| # | Task | Files touched | [State] |
+|---|------|---------------|---------|
+| 8.1 | Implement Google Drive upload for rendered `.docx`, `.xlsx`, and `.pdf` outputs. | `/src/doc_modifier/drive_client.py` | [todo] |
+| 8.2 | Persist local output paths and Drive destinations in the job record for traceability. | `/src/doc_modifier/job_store.py`, `/src/doc_modifier/workflow.py` | [todo] |
+| 8.3 | Handle partial failures so local outputs are preserved when Drive upload or Slack notification fails. | `/src/doc_modifier/workflow.py`, `/src/doc_modifier/drive_client.py`, `/src/doc_modifier/slack_client.py` | [todo] |
+
+## Phase 9 — End-to-End Verification
+
+| # | Task | Files touched | [State] |
+|---|------|---------------|---------|
+| 9.1 | Simulate a Slack request followed by approval; verify one request produces the expected local files and Drive upload. | `/tests/`, `/output/` | [todo] |
+| 9.2 | Verify rejection stops generation and leaves no Drive artifacts. | `/tests/` | [todo] |
+| 9.3 | Verify rendering, Drive upload, and Slack notification failures are reported without deleting local outputs. | `/tests/` | [todo] |
+
 ## Traceability Matrix
 
 | Requirement | Implemented in | Verified in |
@@ -59,8 +83,23 @@ Step-by-step execution sequence. Each step has a **[State]** — `[todo]`, `[doi
 | FR-5 | docx_replacer.py (`{{token}}` regex) | T-1 |
 | FR-6 | xlsx_replacer.py | T-1 (xlsx path) |
 | FR-7 | SKILL.md + cli.py | manual |
+| FR-8 | tokenize_template.py + tokenizer frontends | T-7 |
+| FR-9 | tokenize_cli.py + tokenize_template.py | T-6 |
+| FR-10 | tokenize_template.py (`emit_starter_data`) | T-6 / manual |
+| FR-11 | tokenize_template.py + tokenize_cli.py | T-9 |
+| FR-12 | tokenize_template.py | T-8 |
+| FR-13 | tokenize_cli.py + template-tokenizer Skill | manual |
+| FR-14 | workflow.py + slack_client.py | T-10 / T-11 |
+| FR-15 | workflow.py + slack_client.py | T-10 / T-11 |
+| FR-16 | workflow.py + drive_client.py | T-11 / T-12 |
+| FR-17 | slack_client.py + workflow.py | T-11 / T-12 |
+| FR-18 | workflow.py + pipeline.py + tokenize_template.py | manual / template profile smoke test |
 | NFR-1 | docx_replacer.py (no `<w:p>`/`<w:br>` mutation) | T-3 / 5.3 |
 | NFR-2 | docx_replacer.py (preserves `<w:rPr>`) | T-2 / 5.2 |
 | NFR-3 | regex confined to `{{…}}` only | T-1 |
 | NFR-4 | Engine is template-agnostic; depends only on token presence | manual (apply to a 2nd template) |
 | NFR-5 | pdf_exporter.py fallback chain | T-5 |
+| NFR-6 | tokenize_template.py + docx_replacer.py | T-7 |
+| NFR-7 | tokenize_template.py | T-7 / manual |
+| NFR-8 | workflow.py + job_store.py | T-10 / T-11 / T-12 |
+| NFR-9 | workflow.py + drive_client.py + slack_client.py | T-12 |

@@ -1,6 +1,9 @@
 # Requirements
 
 Derived from `user_story.md`. The "Why" → "What" → measurable "Done".
+This version adds the operational workflow from the detailed user story:
+Slack intake, approval routing, document generation, local and Google Drive
+delivery, and completion notification.
 
 ## 1. Functional Requirements
 
@@ -19,6 +22,11 @@ Derived from `user_story.md`. The "Why" → "What" → measurable "Done".
 | FR-11 | The tokenizer **MUST** accept an explicit override mapping (`.yaml` / `.json` / `.xlsx`) that supplements — or, with `--no-auto-detect`, replaces — the auto-detected plan. | Cover inline-only fields the heuristic misses |
 | FR-12 | The tokenizer **MUST** distinguish *cell-scoped* replacements (one specific table cell) from *document-wide* replacements (e.g. inline body matches), so two table rows sharing the same sample value (e.g. "Japan") can receive distinct tokens without bleed-over. | Ambiguity correctness; surfaced during smoke test |
 | FR-13 | The tokenizer **MUST** be invokable both as a **Cowork Skill** (`template-tokenizer`) and as a **standalone CLI** (`python -m doc_modifier.tokenize_cli`). | Same dual-front-end principle as FR-7 |
+| FR-14 | The system **MUST** accept applicant data from Slack as the primary intake channel for document requests. | Detailed User Story step 1 |
+| FR-15 | The system **MUST** route each request to a designated approval Slack channel and wait for an explicit approve/reject decision before generating documents. | Detailed User Story step 2 |
+| FR-16 | On approval, the system **MUST** generate documents from the selected template and save the outputs to both the designated local output directory and the configured Google Drive folder. | Detailed User Story step 3 |
+| FR-17 | The system **MUST** notify Slack when document creation completes, including the request status and output locations. | Detailed User Story step 4 |
+| FR-18 | The system **MUST** support multiple document styles through template/profile configuration rather than hard-coding a single invitation-letter flow. | Detailed User Story + AC-3 |
 
 ## 2. Non-Functional Requirements
 
@@ -31,13 +39,15 @@ Derived from `user_story.md`. The "Why" → "What" → measurable "Done".
 | NFR-5 | The CLI **MUST** run on macOS (Cowork host) without requiring Microsoft Word; PDF export falls back to LibreOffice headless if available. | Practical constraint |
 | NFR-6 | The tokenizer **MUST** preserve fonts (フォント) and line breaks (改行) of the source document — same guarantee the renderer provides (NFR-1, NFR-2). The tokenized output must be byte-equivalent in `<w:p>` / `<w:br>` counts to the source. | AC-1 / AC-2 extended to tokenization |
 | NFR-7 | The tokenizer **MUST NOT** modify the source file in place. Source documents live in `templates/originals/`; tokenized outputs are written to `templates/<new_name>.docx`. | Data-loss prevention |
+| NFR-8 | The workflow **MUST** leave an auditable trail of request ID, requester, approver, timestamps, and output destinations for each document job. | Operational control |
+| NFR-9 | If Google Drive upload or Slack notification fails after local rendering succeeds, the system **MUST** preserve the local outputs and report the partial failure clearly. | Reliability / recoverability |
 
 ## 3. Out of Scope
 
 - OCR (Optical Character Recognition, 光学文字認識) of scanned PDFs.
 - Auto-detecting fields without placeholder tokens (rejected in favor of explicit `{{token}}` marking).
 - Editing or signing PDFs after generation.
-- Sending the generated document by email/Slack (handled by a separate downstream automation).
+- Sending the generated document by email/Slack beyond the completion notification and approval loop described above.
 
 ## 4. Acceptance Test Matrix
 
@@ -52,3 +62,6 @@ Derived from `user_story.md`. The "Why" → "What" → measurable "Done".
 | T-7 | Tokenize the original Adventure India invitation letter, render against `sample_data.xlsx`, then compare to the hand-built tokenized template's render. | Rendered text is byte-equal; `<w:p>` and `<w:br>` counts identical at source / auto-tokenized / rendered stages (53 / 53 / 53 and 0 / 0 / 0). |
 | T-8 | Two table rows both containing the value "Japan" are present in the source. | Tokenizer assigns distinct tokens (`{{nationality}}` and `{{passport_issuing_country}}`) cell-scoped; ambiguity warning is printed; no doc-wide bleed-over. |
 | T-9 | Provide `--mapping mappings.yaml` with one entry not present in any table. | The entry is honored as a doc-wide replacement; auto-detect plan still runs (unless `--no-auto-detect` was passed). |
+| T-10 | Submit a request in Slack and withhold approval. | No document is generated; the request remains pending approval and no Drive upload occurs. |
+| T-11 | Approve a Slack request for a valid template/profile. | The system produces the expected local output, uploads to Google Drive, and posts a completion message with links or paths. |
+| T-12 | Force a Drive upload or Slack notification failure after rendering succeeds. | Local outputs remain intact; the workflow records a partial-failure status and surfaces the issue without losing generated documents. |
