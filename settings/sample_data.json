@@ -1,0 +1,8 @@
+{
+    "template_local_file": "templates/template_sample_data.docx",
+    "source_table_file": "data/sample_data.xlsx",
+    "local_output_directory": "output",
+    "output_Google_drive_directory": "https://drive.google.com/drive/folders/1ELyFup7-8zTd3fl2JLRmY41wcRN1Sf6y?usp=drive_link",
+    "data_source_spreadsheet": "https://docs.google.com/spreadsheets/d/1h8Ex7p2mWnXtFa8PA9cy2qASuIPVpbKNXcW4lr3P5Ho/edit?usp=sharing",
+    "slack_channel_id": "C0B6Z2AHUTB"
+}

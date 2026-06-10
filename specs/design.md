@@ -56,6 +56,101 @@ flowchart LR
 
 The tokenizer is **upstream** of the renderer: a source `.docx` flows through the tokenizer once per document type, then the workflow layer invokes the renderer once per approved batch of applicants.
 
+### 1.1 End-to-End Data Flow
+
+The complete workflow follows this formal sequence:
+
+**Phase 1: Data Intake (Slack → Google Sheets)**
+- **Input**: Slack form submission containing structured data (e.g., `{name, date_of_birth, nationality, passport_no, …}`)
+- **Agent responsible**: `slack_client` module (webhook receiver)
+- **Transformation**: Parse webhook payload; validate field mappings; generate unique `job_id`
+- **Output**: New row appended to Google Sheets (`data/sample_data.xlsx`) with columns `{job_id, name, date_of_birth, …}`
+- **State transition**: `IDLE` → `CAPTURING`
+- **Data contract**: Slack form fields must map to Excel column headers (case-insensitive, punctuation-normalized)
+
+**Phase 2: Approval Gate (Slack Workflow Execution)**
+- **Input**: Job metadata from Phase 1: `{job_id, applicant_name, submission_timestamp}`
+- **Agent responsible**: Slack native workflow (configured by user); monitored by `job_store`
+- **Transformation**: Person in charge reviews Slack notification and selects approve/reject action
+- **Output**: Approval decision record: `{job_id, approved: boolean, approver_id, approver_timestamp}`
+- **State transition**: `CAPTURING` → `AWAITING_APPROVAL`
+
+**Phase 3: Approval Polling & Persistence**
+- **Input**: Slack channel message containing approval decision
+- **Agent responsible**: `job_store` module (monitors Slack approval channel via `slack_client`)
+- **Transformation**: Poll approval channel; detect and parse approval message; persist to audit log
+- **Output**: Updated job record in `job_store`: `{job_id, status: APPROVED | REJECTED, decision_metadata}`
+- **State transition**: `AWAITING_APPROVAL` → `APPROVED` | `REJECTED`
+
+**Phase 4: Document Generation (Claude Cowork - Conditional on Approval)**
+- **Condition**: Proceed only if `status == APPROVED`
+- **Inputs**:
+  - Template resource: `templates/<Template_Name>.docx` (tokenized, with `{{key}}` placeholders)
+  - Data source: Single row from Google Sheets queried by `job_id`
+  - Token mapping: Implicit (headers → token names) or explicit (from `--mapping` file)
+- **Agent responsible**: `document-modification` Cowork Skill (invokes `pipeline.py`)
+- **Transformation sequence**:
+  1. Load tokenized template via `docx_replacer.run_aware_replacement(template_path)`
+  2. Load data row via `xlsx_loader.read_row(data_file, job_id)`
+  3. For each token `{{key}}` in template: locate value in row dict; invoke run-aware replacement (preserves `<w:rPr>` formatting)
+  4. Write rendered document to `/output/<output_filename>.docx`
+  5. (Optional, if `--pdf` flag set) Export to `.pdf` via `pdf_exporter.convert_to_pdf(docx_path)`
+- **Output**: 
+  - Rendered files: `/output/{job_id}_<document_type>_{name}.docx` (and `.pdf` if requested)
+  - Job state update: `{job_id, status: GENERATING}`
+- **State transition**: `APPROVED` → `GENERATING` → `DELIVERING_LOCAL`
+- **Data contract**: All tokens in template must have corresponding keys in Excel row; missing keys are logged but do not crash
+
+**Phase 5: File Storage & Cloud Sync (Local + Google Drive)**
+- **Input**: Rendered files from `/output/` directory
+- **Agent responsible**: `drive_client` module
+- **Transformation**:
+  1. Upload `.docx` / `.pdf` to Google Drive folder specified in config
+  2. Generate and store shareable link: `https://drive.google.com/file/d/{file_id}`
+  3. Update job record with Drive metadata: `{file_id, drive_url, upload_timestamp, file_size}`
+- **Output**: 
+  - Remote storage: Files persisted in Google Drive under path `/Document-Modification/{job_id}/`
+  - Job state: `{job_id, status: DELIVERING_DRIVE, drive_url}`
+- **State transition**: `DELIVERING_LOCAL` → `DELIVERING_DRIVE`
+
+**Phase 6: Completion Notification (Slack)**
+- **Input**: 
+  - Job metadata: `{job_id, applicant_name}`
+  - Drive artifact: `{drive_url, file_id}`
+  - Outcome: `success | rejected | failed`
+- **Agent responsible**: `slack_client` module (posts completion message)
+- **Transformation**: Format markdown message with Drive link; post to Slack intake channel
+- **Output**: Slack message in channel: `"✅ Document ready for {applicant_name}. [Download from Drive]({drive_url})"`  (on success) or `"❌ Job {job_id} was rejected by {approver_name}"` (on rejection)
+- **State transition**: `DELIVERING_DRIVE` → `NOTIFYING` → `DONE`
+
+**Failure Paths**:
+| Failure Point | Trigger | Behavior | Final State |
+|---|---|---|---|
+| Phase 3 (Approval) | Approver rejects request | Skip phases 4–6; post rejection notice to Slack; do not generate document | `REJECTED` (terminal) |
+| Phase 4 (Generation) | Token not found in data row | Log warning; leave placeholder untouched; continue with other tokens | Partial success; user alerted |
+| Phase 4 (Generation) | PDF export backend unavailable | Skip `.pdf` output; keep `.docx` | Partial success; user notified |
+| Phase 5 (Drive sync) | Upload fails (network/quota) | Retry with exponential backoff; alert person in charge; keep local copy | `FAILED` (manual intervention required) |
+| Phase 6 (Notification) | Slack API unreachable | File is safe in Drive; job marked incomplete; manual follow-up required | `FAILED` (but artifact persisted) |
+
+**Data Dependency Graph** (for AI model understanding):
+```
+Slack form submission (contains: name, date_of_birth, nationality, passport_no, …)
+  ↓ [Phase 1: `slack_client.parse_form()`]
+Google Sheets row (with job_id, all applicant fields)
+  ↓ [Phase 2: Slack workflow; Phase 3: `job_store.poll_approval()`]
+Approval decision (approved: boolean, approver_id, timestamp)
+  ↓ [Phase 4: if approved, retrieve row from Sheets]
+Excel row data (dict: {name: "John", date_of_birth: "1990-01-01", …})
+  ↓ [Phase 4: `pipeline.render(template, row_data)`]
+Rendered document (`.docx` bytes + optional `.pdf` bytes)
+  ↓ [Phase 5: `drive_client.upload_to_drive()`]
+Google Drive storage with shareable URL
+  ↓ [Phase 6: `slack_client.post_completion_notice()`]
+Slack notification in intake channel with Drive link
+  ↓ [End]
+Job marked `DONE` in `job_store`
+```
+
 ## 2. Component Responsibilities
 
 | Module | Responsibility |
@@ -224,18 +319,24 @@ At apply time, cell-scoped replacements are written into the specific cell only 
 
 The Excel data file (e.g. `sample_data.xlsx`) **MUST** have a header row with at least these columns when rendering the default invitation-letter template:
 
-| Column header (case-insensitive) | Token rendered into template |
-|---|---|
-| `name` | `{{name}}` |
-| `date_of_birth` | `{{date_of_birth}}` |
-| `nationality` | `{{nationality}}` |
-| `passport_no` | `{{passport_no}}` |
-| `passport_issuing_country` | `{{passport_issuing_country}}` |
-| `date_of_issue` | `{{date_of_issue}}` |
-| `date_of_expiry` | `{{date_of_expiry}}` |
-| `mobile_no` | `{{mobile_no}}` |
+| Column header (case-insensitive) | Type | Required | Purpose |
+|---|---|---|---|
+| `name` | string | ✅ Required | Rendered as `{{name}}` in template |
+| `date_of_birth` | string | ✅ Required | Rendered as `{{date_of_birth}}` in template |
+| `nationality` | string | ✅ Required | Rendered as `{{nationality}}` in template |
+| `passport_no` | string | ✅ Required | Rendered as `{{passport_no}}` in template |
+| `passport_issuing_country` | string | ✅ Required | Rendered as `{{passport_issuing_country}}` in template |
+| `date_of_issue` | string | ✅ Required | Rendered as `{{date_of_issue}}` in template |
+| `date_of_expiry` | string | ✅ Required | Rendered as `{{date_of_expiry}}` in template |
+| `mobile_no` | string | ✅ Required | Rendered as `{{mobile_no}}` in template |
+| `progress` | enum: `ToDo` \| `Done` | ✅ Required | Tracks generation state; prevents duplicate document generation |
+| `output_filename` | string | Optional | If absent, falls back to `letter_<row>_<sanitized_name>.docx` |
 
-Optional column: `output_filename` — if absent, falls back to `letter_<row>_<sanitized_name>.docx`.
+**Progress Column Behavior**:
+- **Initial state**: New rows should have `progress = "ToDo"`
+- **After generation**: Row is updated to `progress = "Done"` once document is successfully created and uploaded
+- **Claude logic**: Before generating, check `progress` column; skip rows with `progress = "Done"` to prevent duplicates
+- **Manual reset**: If regeneration is needed, user can manually change a row's progress from `"Done"` to `"ToDo"` in Sheets or Excel
 
 Header text is normalized by stripping punctuation and lowercasing, so `Passport No.` and `passport_no` are accepted equivalently.
 
