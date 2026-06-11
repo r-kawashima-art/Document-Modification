@@ -20,6 +20,9 @@ templates/
 docs/*
 !docs/slack_integration_setup.md
 
+# Mine
+slackbot_for_claude/
+
 
 # C extensions
 *.so

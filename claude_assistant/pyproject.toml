@@ -1,0 +1,34 @@
+[project]
+name = "claude-slack-agent"
+version = "0.1.0"
+description = "Slack integration for Claude Cowork document automation"
+requires-python = ">=3.9"
+authors = [
+    {name = "Adventure Inc.", email = "dev@adventure-inc.co.jp"}
+]
+dependencies = [
+    "slack-bolt>=1.18",
+    "openpyxl>=3.0",
+    "google-auth-oauthlib>=1.0",
+    "pydantic>=2.0",
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
